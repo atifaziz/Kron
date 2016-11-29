@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0-beta-*",
+  "title": "Simple & Generic Task-Based Job Scheduler",
+  "description": ".NET Standard 1.0 library that implements a simple and generic job scheduler. It is simple because it only provides building blocks. It is generic because it does not care about how jobs and schedules are defined as long as jobs are Task-based functions and schedules are functions of time.",
+  "authors": [ "Atif Aziz" ],
+  "copyright": "Copyright \u00a9 2016 Atif Aziz. All rights reserved.",
+
+  "packOptions": {
+    "projectUrl": "https://github.com/atifaziz/Kron",
+    "licenseUrl": "http://www.apache.org/licenses/LICENSE-2.0",
+    "owners": [ "Atif Aziz" ],
+    "tags": [ "cron", "scheduler", "jobs", "job" ],
+    "files": {
+      "include": "../../COPYING.txt"
+    }
+  },
+
+  "buildOptions": {
+    "debugType": "portable",
+    "compile": {
+      "include": "../Worms/**.cs",
+      "exclude": [
+        "../Worms/Assembly*.cs",
+        "../Worms/Public.cs"
+      ]
+    }
+  },
+
+  "dependencies": {
+    "NETStandard.Library": "1.6.0"
+  },
+
+  "frameworks": {
+    "netstandard1.0": {
+      "imports": "dnxcore50"
+    }
+  }
+}
