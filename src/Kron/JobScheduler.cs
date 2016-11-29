@@ -96,7 +96,7 @@ namespace Kron
 
     public sealed class JobScheduler<T>
     {
-        public event EventHandler<JobEventArgs<T>> JobStarted;
+        public event EventHandler<JobStartedEventArgs<T>> JobStarted;
         public event EventHandler<JobEndedEventArgs<T>> JobEnded;
         public event EventHandler<JobRemovalEventArgs<T>> JobRemoved;
         public event EventHandler<JobSchedulerIdleEventArgs<T>> Idling;
