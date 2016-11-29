@@ -106,6 +106,8 @@ namespace Kron
 
         public Task Task { get; private set; }
 
+        JobScheduler() { }
+
         public static JobScheduler<T> Start(CancellationToken cancellationToken)
         {
             var scheduler = new JobScheduler<T>();
