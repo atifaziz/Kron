@@ -164,7 +164,7 @@ namespace Kron
                         orderby e.NextRunTime
                         select e;
 
-                    foreach (var e in nextJobs.ToArray())
+                    foreach (var e in nextJobs)
                     {
                         if (e.NextRunTime < e.LastEndTime)
                         {
