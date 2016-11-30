@@ -152,72 +152,70 @@ namespace Kron
 
                 var completedTask = await Task.WhenAny(outstandingTasks);
 
-                if (completedTask == newJobsWaitTask || completedTask == sleepTask)
+                Debug.Assert(completedTask != null, nameof(completedTask) + " != null");
+                if (completedTask.IsCanceled)
+                    continue;
+
+                await completedTask;
+                if (completedTask == newJobsWaitTask)
                 {
-                    Debug.Assert(completedTask != null, nameof(completedTask) + " != null");
-                    if (completedTask.IsCanceled)
-                        continue;
-
-                    await completedTask;
-                    if (completedTask == newJobsWaitTask)
-                    {
-                        jobs.AddRange(_newJobs.Update(js => Tuple.Create(EmptyArray<Job>.Value, js)));
-                        newJobsWaitTask = _newJobsEvent.WaitAsync(cancellationToken);
-                    }
-
-                    var nextJobs =
-                        from e in jobs
-                        where runningJobs.All(rj => rj.Job != e)
-                        select new
-                        {
-                            Job = e,
-                            e.LastEndTime,
-                            NextRunTime = e.Scheduler(e.LastEndTime) ?? DateTime.MinValue,
-                        }
-                        into e
-                        orderby e.NextRunTime
-                        select e;
-
-                    foreach (var e in nextJobs)
-                    {
-                        if (e.NextRunTime < e.LastEndTime)
-                        {
-                            jobs.Remove(e.Job);
-                            JobRemoved?.Invoke(this, new JobRemovalEventArgs<T>(e.Job.UserObject, JobRemovalReason.EndOfSchedule));
-                        }
-                        else
-                        {
-                            var time = now();
-                            var duration = e.NextRunTime - time;
-                            if (duration.Ticks <= 0)
-                            {
-                                var runningJob = new RunningJob(e.Job, time, e.Job.Runner(cancellationToken));
-                                runningJobs.Add(runningJob);
-                                JobStarted?.Invoke(this, new JobStartedEventArgs<T>(e.Job.UserObject, runningJob.Task, runningJob.StartTime));
-                            }
-                            else
-                            {
-                                sleepCancellationTokenSource?.Cancel();
-                                sleepCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                                sleepTask = delay(duration, sleepCancellationTokenSource.Token);
-                                Idling?.Invoke(this, new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
-                                break;
-                            }
-                        }
-                    }
+                    jobs.AddRange(_newJobs.Update(js => Tuple.Create(EmptyArray<Job>.Value, js)));
+                    newJobsWaitTask = _newJobsEvent.WaitAsync(cancellationToken);
+                }
+                else if (completedTask == sleepTask)
+                {
+                    sleepTask = null;
                 }
                 else
                 {
                     var i = runningJobs.FindIndex(e => e.Task == completedTask);
-                    if (i >= 0)
+                    var endTime = now();
+                    var runningJob = runningJobs[i];
+                    runningJobs.RemoveAt(i);
+                    var job = runningJob.Job;
+                    job.LastRunTime = runningJob.StartTime;
+                    job.LastEndTime = endTime;
+                    JobEnded?.Invoke(this, new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime));
+                }
+
+                var nextJobs =
+                    from e in jobs
+                    where runningJobs.All(rj => rj.Job != e)
+                    select new
                     {
-                        var endTime = now();
-                        var runningJob = runningJobs[i];
-                        runningJobs.RemoveAt(i);
-                        var job = runningJob.Job;
-                        job.LastRunTime = runningJob.StartTime;
-                        job.LastEndTime = endTime;
-                        JobEnded?.Invoke(this, new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime));
+                        Job = e,
+                        e.LastEndTime,
+                        NextRunTime = e.Scheduler(e.LastEndTime) ?? DateTime.MinValue,
+                    }
+                    into e
+                    orderby e.NextRunTime
+                    select e;
+
+                foreach (var e in nextJobs)
+                {
+                    if (e.NextRunTime < e.LastEndTime)
+                    {
+                        jobs.Remove(e.Job);
+                        JobRemoved?.Invoke(this, new JobRemovalEventArgs<T>(e.Job.UserObject, JobRemovalReason.EndOfSchedule));
+                    }
+                    else
+                    {
+                        var time = now();
+                        var duration = e.NextRunTime - time;
+                        if (duration.Ticks <= 0)
+                        {
+                            var runningJob = new RunningJob(e.Job, time, e.Job.Runner(cancellationToken));
+                            runningJobs.Add(runningJob);
+                            JobStarted?.Invoke(this, new JobStartedEventArgs<T>(e.Job.UserObject, runningJob.Task, runningJob.StartTime));
+                        }
+                        else
+                        {
+                            sleepCancellationTokenSource?.Cancel();
+                            sleepCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                            sleepTask = delay(duration, sleepCancellationTokenSource.Token);
+                            Idling?.Invoke(this, new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
+                            break;
+                        }
                     }
                 }
             }
