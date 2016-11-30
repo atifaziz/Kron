@@ -108,14 +108,28 @@ namespace Kron
 
         JobScheduler() { }
 
-        public static JobScheduler<T> Start(CancellationToken cancellationToken)
+        public static JobScheduler<T> Start(CancellationToken cancellationToken) =>
+            Start(cancellationToken, null, null);
+
+        public static JobScheduler<T> Start(CancellationToken cancellationToken,
+                                            Func<DateTime> clockFunc,
+                                            Func<TimeSpan, CancellationToken, Task> delayFunc)
         {
+            if (clockFunc == null && delayFunc != null)
+                throw new ArgumentNullException(nameof(clockFunc));
+            if (clockFunc != null && delayFunc == null)
+                throw new ArgumentNullException(nameof(delayFunc));
+
             var scheduler = new JobScheduler<T>();
-            scheduler.Task = scheduler.RunAsync(cancellationToken);
+            scheduler.Task = scheduler.RunAsync(cancellationToken,
+                                                clockFunc ?? (() => DateTime.Now),
+                                                delayFunc ?? Task.Delay);
             return scheduler;
         }
 
-        async Task RunAsync(CancellationToken cancellationToken)
+        async Task RunAsync(CancellationToken cancellationToken,
+                            Func<DateTime> now, Func<TimeSpan,
+                            CancellationToken, Task> delay)
         {
             var jobs = new List<Job>();
             var runningJobs = new List<RunningJob>();
@@ -173,10 +187,11 @@ namespace Kron
                         }
                         else
                         {
-                            var duration = e.NextRunTime - DateTime.Now;
+                            var time = now();
+                            var duration = e.NextRunTime - time;
                             if (duration.Ticks <= 0)
                             {
-                                var runningJob = new RunningJob(e.Job, DateTime.Now, e.Job.Runner(cancellationToken));
+                                var runningJob = new RunningJob(e.Job, time, e.Job.Runner(cancellationToken));
                                 runningJobs.Add(runningJob);
                                 JobStarted?.Invoke(this, new JobStartedEventArgs<T>(e.Job.UserObject, runningJob.Task, runningJob.StartTime));
                             }
@@ -184,7 +199,7 @@ namespace Kron
                             {
                                 sleepCancellationTokenSource?.Cancel();
                                 sleepCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                                sleepTask = Task.Delay(duration, sleepCancellationTokenSource.Token);
+                                sleepTask = delay(duration, sleepCancellationTokenSource.Token);
                                 Idling?.Invoke(this, new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
                                 break;
                             }
@@ -196,7 +211,7 @@ namespace Kron
                     var i = runningJobs.FindIndex(e => e.Task == completedTask);
                     if (i >= 0)
                     {
-                        var endTime = DateTime.Now;
+                        var endTime = now();
                         var runningJob = runningJobs[i];
                         runningJobs.RemoveAt(i);
                         var job = runningJob.Job;
