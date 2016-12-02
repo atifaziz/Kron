@@ -135,7 +135,7 @@ namespace Kron
             var runningJobs = new List<RunningJob>();
             var newJobsWaitTask = _newJobsEvent.WaitAsync(cancellationToken);
             var sleepCancellationTokenSource = (CancellationTokenSource) null;
-            var sleepTask = (Task) null;
+            var sleepTask = (Task<Job>) null;
 
             while (true)
             {
@@ -156,15 +156,17 @@ namespace Kron
                 if (completedTask.IsCanceled)
                     continue;
 
-                await completedTask;
                 if (completedTask == newJobsWaitTask)
                 {
+                    await completedTask;
                     jobs.AddRange(_newJobs.Update(js => Tuple.Create(EmptyArray<Job>.Value, js)));
                     newJobsWaitTask = _newJobsEvent.WaitAsync(cancellationToken);
                 }
                 else if (completedTask == sleepTask)
                 {
+                    var job = await sleepTask;
                     sleepTask = null;
+                    RunJob(job, now(), cancellationToken, runningJobs);
                 }
                 else
                 {
@@ -204,21 +206,27 @@ namespace Kron
                         var duration = e.NextRunTime - time;
                         if (duration.Ticks <= 0)
                         {
-                            var runningJob = new RunningJob(e.Job, time, e.Job.Runner(cancellationToken));
-                            runningJobs.Add(runningJob);
-                            JobStarted?.Invoke(this, new JobStartedEventArgs<T>(e.Job.UserObject, runningJob.Task, runningJob.StartTime));
+                            RunJob(e.Job, time, cancellationToken, runningJobs);
                         }
                         else
                         {
                             sleepCancellationTokenSource?.Cancel();
                             sleepCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                            sleepTask = delay(duration, sleepCancellationTokenSource.Token);
+                            sleepTask = delay(duration, sleepCancellationTokenSource.Token).ThenReturn(e.Job);
                             Idling?.Invoke(this, new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
                             break;
                         }
                     }
                 }
             }
+        }
+
+        void RunJob(Job job, DateTime time, CancellationToken cancellationToken, ICollection<RunningJob> runningJobs)
+        {
+            var runningJob = new RunningJob(job, time, job.Runner(cancellationToken));
+            runningJobs.Add(runningJob);
+            var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime);
+            JobStarted?.Invoke(this, args);
         }
 
         public void AddJob(T job, Func<T, Func<DateTime, DateTime?>> scheduleSelector,
