@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyCompany("N/A")]
@@ -14,3 +15,5 @@ using System.Runtime.InteropServices;
 #else
 [assembly: AssemblyConfiguration("RELEASE")]
 #endif
+
+[assembly: InternalsVisibleTo("Kron.Tests")]

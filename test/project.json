@@ -1,11 +1,8 @@
 {
+  "name": "Kron.Tests",
   "version": "1.0.0-*",
   "buildOptions": {
-    "debugType": "portable",
-    "compile": {
-      "include": "../src/Worms/**.cs",
-      "exclude": "../src/Worms/Assembly*.cs"
-    }
+    "debugType": "portable"
   },
   "dependencies": {
     "System.Runtime.Serialization.Primitives": "4.1.1",

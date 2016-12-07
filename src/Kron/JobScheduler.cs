@@ -111,9 +111,9 @@ namespace Kron
         public static JobScheduler<T> Start(CancellationToken cancellationToken) =>
             Start(cancellationToken, null, null);
 
-        public static JobScheduler<T> Start(CancellationToken cancellationToken,
-                                            Func<DateTime> clockFunc,
-                                            Func<TimeSpan, CancellationToken, Task> delayFunc)
+        internal static JobScheduler<T> Start(CancellationToken cancellationToken,
+                                              Func<DateTime> clockFunc,
+                                              Func<TimeSpan, CancellationToken, Task> delayFunc)
         {
             if (clockFunc == null && delayFunc != null)
                 throw new ArgumentNullException(nameof(clockFunc));
