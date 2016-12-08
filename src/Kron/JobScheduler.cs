@@ -109,9 +109,23 @@ namespace Kron
         JobScheduler() { }
 
         public static JobScheduler<T> Start(CancellationToken cancellationToken) =>
-            Start(cancellationToken, null, null);
+            Start(cancellationToken, null, eventScheduler: null);
+
+        public static JobScheduler<T> Start(CancellationToken cancellationToken,
+                                            TaskScheduler jobTaskScheduler,
+                                            TaskScheduler eventScheduler) =>
+            Start(cancellationToken, jobTaskScheduler, eventScheduler, null, null);
 
         internal static JobScheduler<T> Start(CancellationToken cancellationToken,
+                                              Func<DateTime> clockFunc,
+                                              Func<TimeSpan, CancellationToken, Task> delayFunc)
+        {
+            return Start(cancellationToken, null, null, clockFunc, delayFunc);
+        }
+
+        internal static JobScheduler<T> Start(CancellationToken cancellationToken,
+                                              TaskScheduler jobTaskScheduler,
+                                              TaskScheduler eventScheduler,
                                               Func<DateTime> clockFunc,
                                               Func<TimeSpan, CancellationToken, Task> delayFunc)
         {
@@ -122,15 +136,30 @@ namespace Kron
 
             var scheduler = new JobScheduler<T>();
             scheduler.Task = scheduler.RunAsync(cancellationToken,
+                                                jobTaskScheduler ?? TaskScheduler.Default,
+                                                eventScheduler ?? TaskScheduler.Current,
                                                 clockFunc ?? (() => DateTime.Now),
                                                 delayFunc ?? Task.Delay);
             return scheduler;
         }
 
         async Task RunAsync(CancellationToken cancellationToken,
+                            TaskScheduler jobTaskScheduler,
+                            TaskScheduler eventScheduler,
                             Func<DateTime> now, Func<TimeSpan,
                             CancellationToken, Task> delay)
         {
+            var events = new
+            {
+                // The Ignore avoids having to litter code with suppression
+                // of CS4014 warning at each call site.
+
+                JobStarted = this.CreateEventAsyncRaiser(me => me.JobStarted, cancellationToken, eventScheduler).Ignore(),
+                JobEnded   = this.CreateEventAsyncRaiser(me => me.JobEnded  , cancellationToken, eventScheduler).Ignore(),
+                JobRemoved = this.CreateEventAsyncRaiser(me => me.JobRemoved, cancellationToken, eventScheduler).Ignore(),
+                Idling     = this.CreateEventAsyncRaiser(me => me.Idling    , cancellationToken, eventScheduler).Ignore(),
+            };
+
             var jobs = new List<Job>();
             var runningJobs = new List<RunningJob>();
             var newJobsWaitTask = _newJobsEvent.WaitAsync(cancellationToken);
@@ -166,7 +195,7 @@ namespace Kron
                 {
                     var job = await sleepTask;
                     sleepTask = null;
-                    RunJob(job, now(), cancellationToken, runningJobs);
+                    RunJob(job, now(), cancellationToken, jobTaskScheduler, runningJobs, events.JobStarted);
                 }
                 else
                 {
@@ -177,7 +206,7 @@ namespace Kron
                     var job = runningJob.Job;
                     job.LastRunTime = runningJob.StartTime;
                     job.LastEndTime = endTime;
-                    JobEnded?.Invoke(this, new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime));
+                    events.JobEnded(new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime));
                 }
 
                 var nextJobs =
@@ -198,7 +227,7 @@ namespace Kron
                     if (e.NextRunTime < e.LastEndTime)
                     {
                         jobs.Remove(e.Job);
-                        JobRemoved?.Invoke(this, new JobRemovalEventArgs<T>(e.Job.UserObject, JobRemovalReason.EndOfSchedule));
+                        events.JobRemoved(new JobRemovalEventArgs<T>(e.Job.UserObject, JobRemovalReason.EndOfSchedule));
                     }
                     else
                     {
@@ -206,14 +235,14 @@ namespace Kron
                         var duration = e.NextRunTime - time;
                         if (duration.Ticks <= 0)
                         {
-                            RunJob(e.Job, time, cancellationToken, runningJobs);
+                            RunJob(e.Job, time, cancellationToken, jobTaskScheduler, runningJobs, events.JobStarted);
                         }
                         else
                         {
                             sleepCancellationTokenSource?.Cancel();
                             sleepCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                             sleepTask = delay(duration, sleepCancellationTokenSource.Token).ThenReturn(e.Job);
-                            Idling?.Invoke(this, new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
+                            events.Idling(new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
                             break;
                         }
                     }
@@ -221,12 +250,14 @@ namespace Kron
             }
         }
 
-        void RunJob(Job job, DateTime time, CancellationToken cancellationToken, ICollection<RunningJob> runningJobs)
+        static void RunJob(Job job, DateTime time, CancellationToken cancellationToken, TaskScheduler jobTaskScheduler, ICollection<RunningJob> runningJobs, Action<JobStartedEventArgs<T>> jobStarted)
         {
-            var runningJob = new RunningJob(job, time, job.Runner(cancellationToken));
+            var task = new Task(async () => { await job.Runner(cancellationToken); });
+            task.Start(jobTaskScheduler);
+            var runningJob = new RunningJob(job, time, task);
             runningJobs.Add(runningJob);
             var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime);
-            JobStarted?.Invoke(this, args);
+            jobStarted(args);
         }
 
         public void AddJob(T job, Func<T, Func<DateTime, DateTime?>> scheduleSelector,

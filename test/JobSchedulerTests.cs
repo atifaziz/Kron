@@ -33,9 +33,16 @@ namespace Kron.Tests
             var jobEnded   = WaitEventAsync<JobEndedEventArgs<string>  >(h => scheduler.JobEnded   += h, h => scheduler.JobEnded   -= h);
             var jobRemoved = WaitEventAsync<JobRemovalEventArgs<string>>(h => scheduler.JobRemoved += h, h => scheduler.JobRemoved -= h);
 
-            var ran = false;
             const string id = "foo";
-            scheduler.AddJob(id, clock.Time.AddSeconds(1), _ => { ran = true; return Task.FromResult(0); });
+            var ran = false;
+            var thisThread = Thread.CurrentThread;
+            Thread jobThread = null;
+            scheduler.AddJob(id, clock.Time.AddSeconds(1), _ =>
+            {
+                ran = true;
+                jobThread = Thread.CurrentThread;
+                return Task.FromResult(0);
+            });
 
             clock.Time += TimeSpan.FromSeconds(1);
             delay.Done();
@@ -50,6 +57,7 @@ namespace Kron.Tests
             Assert.Equal(clock.Time, jobStartedEventArgs.StartTime);
             await jobStartedEventArgs.Task;
             Assert.True(ran);
+            Assert.NotEqual(thisThread, jobThread);
 
             await await Task.WhenAny(jobEnded, scheduler.Task);
             Assert.False(scheduler.Task.IsCompleted);
