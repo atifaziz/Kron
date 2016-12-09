@@ -182,6 +182,7 @@ namespace Kron
                 var completedTask = await Task.WhenAny(outstandingTasks);
 
                 Debug.Assert(completedTask != null, nameof(completedTask) + " != null");
+                // TODO Fix infinite loop bug when completedTask is a running job that cancelled
                 if (completedTask.IsCanceled)
                     continue;
 
