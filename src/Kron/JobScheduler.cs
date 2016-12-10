@@ -149,6 +149,10 @@ namespace Kron
                             Func<DateTime> now, Func<TimeSpan,
                             CancellationToken, Task> delay)
         {
+            var jobTaskFactory = new TaskFactory(
+                cancellationToken, TaskCreationOptions.DenyChildAttach,
+                TaskContinuationOptions.None, jobTaskScheduler);
+
             var events = new
             {
                 // The Ignore avoids having to litter code with suppression
@@ -196,7 +200,7 @@ namespace Kron
                 {
                     var job = await sleepTask;
                     sleepTask = null;
-                    RunJob(job, now(), cancellationToken, jobTaskScheduler, runningJobs, events.JobStarted);
+                    RunJob(job, now(), cancellationToken, jobTaskFactory, runningJobs, events.JobStarted);
                 }
                 else
                 {
@@ -236,7 +240,7 @@ namespace Kron
                         var duration = e.NextRunTime - time;
                         if (duration.Ticks <= 0)
                         {
-                            RunJob(e.Job, time, cancellationToken, jobTaskScheduler, runningJobs, events.JobStarted);
+                            RunJob(e.Job, time, cancellationToken, jobTaskFactory, runningJobs, events.JobStarted);
                         }
                         else
                         {
@@ -251,10 +255,9 @@ namespace Kron
             }
         }
 
-        static void RunJob(Job job, DateTime time, CancellationToken cancellationToken, TaskScheduler jobTaskScheduler, ICollection<RunningJob> runningJobs, Action<JobStartedEventArgs<T>> jobStarted)
+        static void RunJob(Job job, DateTime time, CancellationToken cancellationToken, TaskFactory taskFactory, ICollection<RunningJob> runningJobs, Action<JobStartedEventArgs<T>> jobStarted)
         {
-            var task = new Task(async () => { await job.Runner(cancellationToken); });
-            task.Start(jobTaskScheduler);
+            var task = taskFactory.StartNew(() => job.Runner(cancellationToken), cancellationToken).Unwrap();
             var runningJob = new RunningJob(job, time, task);
             runningJobs.Add(runningJob);
             var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime);
