@@ -187,17 +187,18 @@ namespace Kron
 
                 Debug.Assert(completedTask != null, nameof(completedTask) + " != null");
                 // TODO Fix infinite loop bug when completedTask is a running job that cancelled
-                if (completedTask.IsCanceled)
-                    continue;
 
                 if (completedTask == newJobsWaitTask)
                 {
-                    await completedTask;
+                    if (!completedTask.IsCanceled)
+                        await completedTask;
                     jobs.AddRange(_newJobs.Update(js => Tuple.Create(EmptyArray<Job>.Value, js)));
                     newJobsWaitTask = _newJobsEvent.WaitAsync(cancellationToken);
                 }
                 else if (completedTask == sleepTask)
                 {
+                    if (completedTask.IsCanceled)
+                        continue;
                     var job = await sleepTask;
                     sleepTask = null;
                     RunJob(job, now(), cancellationToken, jobTaskFactory, runningJobs, events.JobStarted);
