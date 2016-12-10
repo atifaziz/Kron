@@ -222,7 +222,7 @@ namespace Kron
                     {
                         Job = e,
                         e.LastEndTime,
-                        NextRunTime = e.Scheduler(e.LastEndTime) ?? DateTime.MinValue,
+                        NextRunTime = e.Scheduler(e.UserObject, e.LastEndTime) ?? DateTime.MinValue,
                     }
                     into e
                     orderby e.NextRunTime
@@ -258,47 +258,55 @@ namespace Kron
 
         static void RunJob(Job job, DateTime time, CancellationToken cancellationToken, TaskFactory taskFactory, ICollection<RunningJob> runningJobs, Action<JobStartedEventArgs<T>> jobStarted)
         {
-            var task = taskFactory.StartNew(() => job.Runner(cancellationToken), cancellationToken).Unwrap();
+            var task = taskFactory.StartNew(() => job.Runner(job.UserObject, cancellationToken), cancellationToken).Unwrap();
             var runningJob = new RunningJob(job, time, task);
             runningJobs.Add(runningJob);
             var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime);
             jobStarted(args);
         }
 
-        public void AddJob(T job, Func<T, Func<DateTime, DateTime?>> scheduleSelector,
-                                  Func<T, Func<CancellationToken, Task>> runnerSelector)
+        public void AddJob(T job, DateTime time, Func<CancellationToken, Task> runner)
         {
-            if (scheduleSelector == null) throw new ArgumentNullException(nameof(scheduleSelector));
-            if (runnerSelector == null) throw new ArgumentNullException(nameof(runnerSelector));
-            AddJob(job, scheduleSelector(job), runnerSelector(job));
+            if (runner == null) throw new ArgumentNullException(nameof(runner));
+            AddJob(job, time, (_, ct) => runner(ct));
         }
 
-        public void AddJob(T job, DateTime time, Func<CancellationToken, Task> runner) =>
-            AddJob(job, dt => time > dt ? time : default(DateTime?), runner);
+        public void AddJob(T job, DateTime time, Func<T, CancellationToken, Task> runner) =>
+            AddJob(job, (_, dt) => time > dt ? time : default(DateTime?), runner);
 
         public void AddJob(T job, Func<DateTime, DateTime?> scheduler,
                                   Func<CancellationToken, Task> runner)
         {
             if (scheduler == null) throw new ArgumentNullException(nameof(scheduler));
             if (runner == null) throw new ArgumentNullException(nameof(runner));
-            AddJob(new Job(job, scheduler, runner));
+            AddJob(job, scheduler, (_, ct) => runner(ct));
         }
 
-        void AddJob(Job job)
+        public void AddJob(T job, Func<DateTime, DateTime?> scheduler,
+                                  Func<T, CancellationToken, Task> runner)
         {
-            _newJobs.Update(js => js.Push(job));
+            if (scheduler == null) throw new ArgumentNullException(nameof(scheduler));
+            AddJob(job, (_, dt) => scheduler(dt), runner);
+        }
+
+        public void AddJob(T job, Func<T, DateTime, DateTime?> scheduleSelector,
+                                  Func<T, CancellationToken, Task> runnerSelector)
+        {
+            if (scheduleSelector == null) throw new ArgumentNullException(nameof(scheduleSelector));
+            if (runnerSelector == null) throw new ArgumentNullException(nameof(runnerSelector));
+            _newJobs.Update(js => js.Push(new Job(job, scheduleSelector, runnerSelector)));
             _newJobsEvent.Set();
         }
 
         sealed class Job
         {
             public readonly T UserObject;
-            public readonly Func<DateTime, DateTime?> Scheduler;
-            public readonly Func<CancellationToken, Task> Runner;
+            public readonly Func<T, DateTime, DateTime?> Scheduler;
+            public readonly Func<T, CancellationToken, Task> Runner;
             public DateTime LastRunTime;
             public DateTime LastEndTime;
 
-            public Job(T job, Func<DateTime, DateTime?> scheduler, Func<CancellationToken, Task> runner)
+            public Job(T job, Func<T, DateTime, DateTime?> scheduler, Func<T, CancellationToken, Task> runner)
             {
                 UserObject = job;
                 Scheduler = scheduler;
