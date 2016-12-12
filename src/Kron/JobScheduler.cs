@@ -94,19 +94,29 @@ namespace Kron
         }
     }
 
-    public sealed class JobScheduler<T>
+    public sealed class JobScheduler<T> : IDisposable
     {
+        readonly Interlocked<Job[]> _newJobs = new Interlocked<Job[]>(EmptyArray<Job>.Value);
+        readonly AutoResetEvent _newJobsEvent = new AutoResetEvent();
+        readonly CancellationTokenSource _cancellationTokenSource;
+
+        CancellationToken CancellationToken => _cancellationTokenSource.Token;
+        public Task Task { get; private set; }
+
+        JobScheduler(CancellationToken cancellationToken)
+        {
+            _cancellationTokenSource =
+                cancellationToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : new CancellationTokenSource();
+        }
+
         public event EventHandler<JobStartedEventArgs<T>> JobStarted;
         public event EventHandler<JobEndedEventArgs<T>> JobEnded;
         public event EventHandler<JobRemovalEventArgs<T>> JobRemoved;
         public event EventHandler<JobSchedulerIdleEventArgs<T>> Idling;
 
-        readonly Interlocked<Job[]> _newJobs = new Interlocked<Job[]>(EmptyArray<Job>.Value);
-        readonly AutoResetEvent _newJobsEvent = new AutoResetEvent();
-
-        public Task Task { get; private set; }
-
-        JobScheduler() { }
+        public static JobScheduler<T> Start() => Start(CancellationToken.None);
 
         public static JobScheduler<T> Start(CancellationToken cancellationToken) =>
             Start(cancellationToken, null, eventScheduler: null);
@@ -134,8 +144,8 @@ namespace Kron
             if (clockFunc != null && delayFunc == null)
                 throw new ArgumentNullException(nameof(delayFunc));
 
-            var scheduler = new JobScheduler<T>();
-            scheduler.Task = scheduler.RunAsync(cancellationToken,
+            var scheduler = new JobScheduler<T>(cancellationToken);
+            scheduler.Task = scheduler.RunAsync(scheduler.CancellationToken,
                                                 jobTaskScheduler ?? TaskScheduler.Default,
                                                 eventScheduler ?? TaskScheduler.Current,
                                                 clockFunc ?? (() => DateTime.Now),
@@ -264,6 +274,23 @@ namespace Kron
             var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime);
             jobStarted(args);
         }
+
+        public void Stop() => TryStop(TimeSpan.FromMilliseconds(Timeout.Infinite));
+
+        public void Stop(TimeSpan timeout)
+        {
+            if (!TryStop(timeout))
+                throw new TimeoutException();
+        }
+
+        public bool TryStop(TimeSpan timeout)
+        {
+            _cancellationTokenSource.Cancel();
+            // ReSharper disable once MethodSupportsCancellation
+            return Task.Wait(timeout);
+        }
+
+        void IDisposable.Dispose() => Stop();
 
         public void AddJob(T job, DateTime time, Func<CancellationToken, Task> runner)
         {
