@@ -257,6 +257,9 @@ namespace Kron
                     events.JobEnded(new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, endTime, cancellationToken));
                 }
 
+                if (cancellationToken.IsCancellationRequested)
+                    continue;
+
                 var nextJobs =
                     from e in jobs
                     where runningJobs.All(rj => rj.Job != e)
