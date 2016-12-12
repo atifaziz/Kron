@@ -31,15 +31,33 @@ namespace Kron
 
     #endregion
 
-    public class JobEventArgs<T> : EventArgs
+    public interface ICancellationTokenProvider
+    {
+        CancellationToken CancellationToken { get; }
+    }
+
+    public class JobEventArgs<T> : EventArgs, ICancellationTokenProvider
     {
         public T Job { get; }
-        public JobEventArgs(T job) { Job = job; }
+        public CancellationToken CancellationToken { get; }
+
+        public JobEventArgs(T job) :
+            this(job, CancellationToken.None) {}
+
+        public JobEventArgs(T job, CancellationToken cancellationToken)
+        {
+            Job = job;
+            CancellationToken = cancellationToken;
+        }
     }
 
     public class JobLifeCycleEventArgs<T> : JobEventArgs<T>
     {
-        public JobLifeCycleEventArgs(T job) : base(job) {}
+        public JobLifeCycleEventArgs(T job) :
+            this(job, CancellationToken.None) {}
+
+        public JobLifeCycleEventArgs(T job, CancellationToken cancellationToken) :
+            base(job, cancellationToken) {}
     }
 
     public class JobStartedEventArgs<T> : JobLifeCycleEventArgs<T>
@@ -48,7 +66,10 @@ namespace Kron
         public DateTime StartTime { get; }
 
         public JobStartedEventArgs(T job, Task task, DateTime startTime) :
-            base(job)
+            this(job, task, startTime, CancellationToken.None) {}
+
+        public JobStartedEventArgs(T job, Task task, DateTime startTime, CancellationToken cancellationToken) :
+            base(job, cancellationToken)
         {
             Task = task;
             StartTime = startTime;
@@ -62,7 +83,10 @@ namespace Kron
         public DateTime EndTime { get; }
 
         public JobEndedEventArgs(T job, Task task, DateTime startTime, DateTime endTime) :
-            base(job)
+            this(job, task, startTime, endTime, CancellationToken.None) {}
+
+        public JobEndedEventArgs(T job, Task task, DateTime startTime, DateTime endTime, CancellationToken cancellationToken) :
+            base(job, cancellationToken)
         {
             Task = task;
             StartTime = startTime;
@@ -76,21 +100,30 @@ namespace Kron
     {
         public JobRemovalReason Reason { get; }
 
-        public JobRemovalEventArgs(T job, JobRemovalReason reason) : base(job)
+        public JobRemovalEventArgs(T job, JobRemovalReason reason) :
+            this(job, reason, CancellationToken.None) {}
+
+        public JobRemovalEventArgs(T job, JobRemovalReason reason, CancellationToken cancellationToken) :
+            base(job, cancellationToken)
         {
             Reason = reason;
         }
     }
 
-    public class JobSchedulerIdleEventArgs<T> : EventArgs
+    public class JobSchedulerIdleEventArgs<T> : EventArgs, ICancellationTokenProvider
     {
+        public CancellationToken CancellationToken { get; }
         public TimeSpan Duration { get; }
         public T NextJob { get; set; }
 
-        public JobSchedulerIdleEventArgs(TimeSpan duration, T nextJob)
+        public JobSchedulerIdleEventArgs(TimeSpan duration, T nextJob) :
+            this(duration, nextJob, CancellationToken.None) {}
+
+        public JobSchedulerIdleEventArgs(TimeSpan duration, T nextJob, CancellationToken cancellationToken)
         {
             Duration = duration;
             NextJob = nextJob;
+            CancellationToken = cancellationToken;
         }
     }
 
@@ -168,10 +201,10 @@ namespace Kron
                 // The Ignore avoids having to litter code with suppression
                 // of CS4014 warning at each call site.
 
-                JobStarted = this.CreateEventAsyncRaiser(me => me.JobStarted, cancellationToken, eventScheduler).Ignore(),
-                JobEnded   = this.CreateEventAsyncRaiser(me => me.JobEnded  , cancellationToken, eventScheduler).Ignore(),
-                JobRemoved = this.CreateEventAsyncRaiser(me => me.JobRemoved, cancellationToken, eventScheduler).Ignore(),
-                Idling     = this.CreateEventAsyncRaiser(me => me.Idling    , cancellationToken, eventScheduler).Ignore(),
+                JobStarted = this.CreateEventAsyncRaiser(me => me.JobStarted, eventScheduler).Ignore(),
+                JobEnded   = this.CreateEventAsyncRaiser(me => me.JobEnded  , eventScheduler).Ignore(),
+                JobRemoved = this.CreateEventAsyncRaiser(me => me.JobRemoved, eventScheduler).Ignore(),
+                Idling     = this.CreateEventAsyncRaiser(me => me.Idling    , eventScheduler).Ignore(),
             };
 
             var jobs = new List<Job>();
@@ -221,7 +254,7 @@ namespace Kron
                     var job = runningJob.Job;
                     job.LastRunTime = runningJob.StartTime;
                     job.LastEndTime = endTime;
-                    events.JobEnded(new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime));
+                    events.JobEnded(new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime, cancellationToken));
                 }
 
                 var nextJobs =
@@ -242,7 +275,7 @@ namespace Kron
                     if (e.NextRunTime < e.LastEndTime)
                     {
                         jobs.Remove(e.Job);
-                        events.JobRemoved(new JobRemovalEventArgs<T>(e.Job.UserObject, JobRemovalReason.EndOfSchedule));
+                        events.JobRemoved(new JobRemovalEventArgs<T>(e.Job.UserObject, JobRemovalReason.EndOfSchedule, cancellationToken));
                     }
                     else
                     {
@@ -257,7 +290,7 @@ namespace Kron
                             sleepCancellationTokenSource?.Cancel();
                             sleepCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                             sleepTask = delay(duration, sleepCancellationTokenSource.Token).ThenReturn(e.Job);
-                            events.Idling(new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject));
+                            events.Idling(new JobSchedulerIdleEventArgs<T>(duration, e.Job.UserObject, cancellationToken));
                             break;
                         }
                     }
@@ -270,7 +303,7 @@ namespace Kron
             var task = taskFactory.StartNew(() => job.Runner(job.UserObject, cancellationToken), cancellationToken).Unwrap();
             var runningJob = new RunningJob(job, time, task);
             runningJobs.Add(runningJob);
-            var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime);
+            var args = new JobStartedEventArgs<T>(job.UserObject, runningJob.Task, runningJob.StartTime, cancellationToken);
             jobStarted(args);
         }
 

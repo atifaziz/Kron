@@ -34,6 +34,12 @@ namespace Kron
         public static Func<TArgs, Task> CreateEventAsyncRaiser<TSender, TArgs>(
             this TSender sender,
             Func<TSender, EventHandler<TArgs>> handlerSelector,
+            TaskScheduler scheduler) =>
+            CreateEventAsyncRaiser(sender, handlerSelector, CancellationToken.None, scheduler);
+
+        public static Func<TArgs, Task> CreateEventAsyncRaiser<TSender, TArgs>(
+            this TSender sender,
+            Func<TSender, EventHandler<TArgs>> handlerSelector,
             CancellationToken cancellationToken,
             TaskScheduler scheduler)
         {
