@@ -254,7 +254,7 @@ namespace Kron
                     var job = runningJob.Job;
                     job.LastRunTime = runningJob.StartTime;
                     job.LastEndTime = endTime;
-                    events.JobEnded(new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, job.LastEndTime, cancellationToken));
+                    events.JobEnded(new JobEndedEventArgs<T>(job.UserObject, runningJob.Task, job.LastRunTime, endTime, cancellationToken));
                 }
 
                 var nextJobs =
@@ -331,9 +331,9 @@ namespace Kron
         }
 
         public void AddJob(T job, DateTime time, Func<T, CancellationToken, Task> runner) =>
-            AddJob(job, (_, dt) => time > dt ? time : default(DateTime?), runner);
+            AddJob(job, dt => time > (dt ?? DateTime.MinValue) ? time : default(DateTime?), runner);
 
-        public void AddJob(T job, Func<DateTime, DateTime?> scheduler,
+        public void AddJob(T job, Func<DateTime?, DateTime?> scheduler,
                                   Func<CancellationToken, Task> runner)
         {
             if (scheduler == null) throw new ArgumentNullException(nameof(scheduler));
@@ -341,14 +341,14 @@ namespace Kron
             AddJob(job, scheduler, (_, ct) => runner(ct));
         }
 
-        public void AddJob(T job, Func<DateTime, DateTime?> scheduler,
+        public void AddJob(T job, Func<DateTime?, DateTime?> scheduler,
                                   Func<T, CancellationToken, Task> runner)
         {
             if (scheduler == null) throw new ArgumentNullException(nameof(scheduler));
             AddJob(job, (_, dt) => scheduler(dt), runner);
         }
 
-        public void AddJob(T job, Func<T, DateTime, DateTime?> scheduleSelector,
+        public void AddJob(T job, Func<T, DateTime?, DateTime?> scheduleSelector,
                                   Func<T, CancellationToken, Task> runnerSelector)
         {
             if (scheduleSelector == null) throw new ArgumentNullException(nameof(scheduleSelector));
@@ -360,12 +360,12 @@ namespace Kron
         sealed class Job
         {
             public readonly T UserObject;
-            public readonly Func<T, DateTime, DateTime?> Scheduler;
+            public readonly Func<T, DateTime?, DateTime?> Scheduler;
             public readonly Func<T, CancellationToken, Task> Runner;
             public DateTime LastRunTime;
-            public DateTime LastEndTime;
+            public DateTime? LastEndTime;
 
-            public Job(T job, Func<T, DateTime, DateTime?> scheduler, Func<T, CancellationToken, Task> runner)
+            public Job(T job, Func<T, DateTime?, DateTime?> scheduler, Func<T, CancellationToken, Task> runner)
             {
                 UserObject = job;
                 Scheduler = scheduler;
